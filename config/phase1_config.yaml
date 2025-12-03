@@ -1,0 +1,30 @@
+# Phase 1 Configuration - OBD-II Based Monitoring
+
+obd:
+  port: /dev/ttyUSB0
+  baudrate: 38400
+  protocol: AUTO
+  timeout: 10
+  fast: false
+
+display:
+  width: 480
+  height: 320
+  fullscreen: true
+  update_rate: 10  # Hz
+
+logging:
+  enabled: true
+  directory: data/logs
+  format: csv
+  include_raw: false
+
+scoring:
+  harsh_brake_threshold: -5.0  # m/s²
+  aggressive_accel_threshold: 3.0  # m/s²
+  speeding_threshold: 120  # kph
+  update_interval: 1.0  # seconds
+
+system:
+  project_root: /home/rays/carmonitor
+  debug: false
