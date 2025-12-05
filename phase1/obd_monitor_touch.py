@@ -103,11 +103,24 @@ class AccelGauge(tk.Canvas):
                                            font=("Helvetica", 14, "bold"))
     
     def value_to_angle(self, value):
-        """Convert acceleration value to angle (225 to 315 degrees, 0 at top)"""
-        # Normalize value to 0-1 range
-        normalized = (value - self.min_val) / (self.max_val - self.min_val)
-        # Map to angle: 225 (left/brake) to 315 (right/accel), with 270 at center (0)
-        angle = 225 + (normalized * 90)
+        """Convert acceleration value to angle (90 degrees = straight up at 0)"""
+        # Map so that 0 is exactly at 90 degrees (straight up/12 o'clock)
+        # Negative values (braking) go left (90 to 180 degrees)
+        # Positive values (accel) go right (90 to 0 degrees)
+        if value <= 0:
+            # Braking side: min_val -> 180°, 0 -> 90°
+            if self.min_val != 0:
+                normalized = (value - self.min_val) / (0 - self.min_val)
+                angle = 180 - (normalized * 90)  # Maps from 180 to 90
+            else:
+                angle = 90
+        else:
+            # Acceleration side: 0 -> 90°, max_val -> 0°
+            if self.max_val != 0:
+                normalized = value / self.max_val
+                angle = 90 - (normalized * 90)  # Maps from 90 to 0
+            else:
+                angle = 90
         return angle
     
     def update_needle(self, value):
