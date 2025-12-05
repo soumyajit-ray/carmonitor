@@ -30,30 +30,35 @@ class AccelGauge(tk.Canvas):
         
     def draw_static(self):
         """Draw the static parts of the gauge"""
-        # Draw red background arc (full range)
+        # Calculate angles for zones
+        harsh_angle = self.value_to_angle(self.harsh_brake)  # ~146° for -5.0
+        accel_angle = self.value_to_angle(self.aggressive_accel)  # ~45° for +3.0
+
+        # Draw three arc segments for top semicircle (0° to 180°)
+        arc_width = 25
+
+        # Right red zone (aggressive acceleration): 0° to accel_angle
         self.create_arc(
             self.center_x - self.radius, self.center_y - self.radius,
             self.center_x + self.radius, self.center_y + self.radius,
-            start=225, extent=90, fill="#e74c3c", outline="", style=tk.PIESLICE
+            start=0, extent=accel_angle, outline="#e74c3c",
+            style=tk.ARC, width=arc_width
         )
-        
-        # Draw green zone (safe range) - from harsh_brake to aggressive_accel
-        # Calculate angles for green zone
-        harsh_angle = self.value_to_angle(self.harsh_brake)
-        accel_angle = self.value_to_angle(self.aggressive_accel)
-        extent = accel_angle - harsh_angle
-        
+
+        # Green zone (safe range): accel_angle to harsh_angle
         self.create_arc(
             self.center_x - self.radius, self.center_y - self.radius,
             self.center_x + self.radius, self.center_y + self.radius,
-            start=harsh_angle, extent=extent, fill="#2ecc71", outline="", style=tk.PIESLICE
+            start=accel_angle, extent=harsh_angle - accel_angle,
+            outline="#2ecc71", style=tk.ARC, width=arc_width
         )
-        
-        # Draw red zone on right (aggressive acceleration)
+
+        # Left red zone (harsh braking): harsh_angle to 180°
         self.create_arc(
             self.center_x - self.radius, self.center_y - self.radius,
             self.center_x + self.radius, self.center_y + self.radius,
-            start=accel_angle, extent=315 - accel_angle, fill="#e74c3c", outline="", style=tk.PIESLICE
+            start=harsh_angle, extent=180 - harsh_angle,
+            outline="#e74c3c", style=tk.ARC, width=arc_width
         )
         
         # Draw center circle
