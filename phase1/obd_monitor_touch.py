@@ -2,6 +2,7 @@
 import sys, tkinter as tk
 from datetime import datetime
 import threading
+import time
 
 sys.path.insert(0, "/home/rays/carmonitor")
 from phase1.obd_reader import OBDReader
@@ -9,14 +10,14 @@ from common.config import Config
 from common.logger import TripLogger
 from common.scoring import DriverScorer
 
-class SimpleGUI:
+class AutoConnectGUI:
     def __init__(self, root):
         self.root = root
         self.root.geometry("800x480")
         self.root.configure(bg="black")
         
         self.config = Config("/home/rays/carmonitor/config/phase1_config.yaml")
-        self.obd = OBDReader(port=self.config.get("obd.port"), baudrate=self.config.get("obd.baudrate"))
+        self.obd = None
         self.logger = TripLogger(log_dir=self.config.get("logging.directory"))
         cfg = {"harsh_brake_threshold": self.config.get("scoring.harsh_brake_threshold"),
                "aggressive_accel_threshold": self.config.get("scoring.aggressive_accel_threshold"),
@@ -27,12 +28,14 @@ class SimpleGUI:
         self.connected = False
         self.last_data = {}
         self.running = True
+        self.connection_attempts = 0
+        
         self.create_widgets()
-        threading.Thread(target=self.connect_obd, daemon=True).start()
+        threading.Thread(target=self.connection_monitor, daemon=True).start()
         self.update_display()
     
     def create_widgets(self):
-        # BUTTONS AT TOP - Always visible!
+        # BUTTONS AT TOP
         btns = tk.Frame(self.root, bg="#2c3e50", height=70)
         btns.pack(side=tk.TOP, fill=tk.X)
         btns.pack_propagate(False)
@@ -50,7 +53,7 @@ class SimpleGUI:
         tk.Button(btns, text="QUIT", font=("Helvetica", 18, "bold"),
                  bg="#95a5a6", fg="white", command=self.quit_app, width=6, height=1).pack(side=tk.RIGHT, padx=10, pady=15)
         
-        self.status = tk.Label(btns, text="●", font=("Helvetica", 20), bg="#2c3e50", fg="#e74c3c")
+        self.status = tk.Label(btns, text="Connecting...", font=("Helvetica", 12), bg="#2c3e50", fg="#f39c12")
         self.status.pack(side=tk.RIGHT, padx=10)
         
         # Data display
@@ -60,13 +63,13 @@ class SimpleGUI:
         left = tk.Frame(main, bg="black")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        self.speed = tk.Label(left, text="0", font=("Helvetica", 70, "bold"), bg="black", fg="white")
+        self.speed = tk.Label(left, text="--", font=("Helvetica", 70, "bold"), bg="black", fg="white")
         self.speed.pack()
         tk.Label(left, text="km/h", font=("Helvetica", 16), bg="black", fg="gray").pack()
         
-        self.rpm = tk.Label(left, text="RPM: 0", font=("Helvetica", 20), bg="black", fg="white")
+        self.rpm = tk.Label(left, text="RPM: --", font=("Helvetica", 20), bg="black", fg="white")
         self.rpm.pack(pady=10)
-        self.throttle = tk.Label(left, text="Throttle: 0%", font=("Helvetica", 20), bg="black", fg="white")
+        self.throttle = tk.Label(left, text="Throttle: --", font=("Helvetica", 20), bg="black", fg="white")
         self.throttle.pack()
         
         right = tk.Frame(main, bg="#34495e", width=250)
@@ -83,11 +86,38 @@ class SimpleGUI:
         self.events = tk.Label(right, text="Events: 0", font=("Helvetica", 13), bg="#34495e", fg="gray")
         self.events.pack(pady=10)
     
-    def connect_obd(self):
-        if self.obd.connect():
-            self.connected = True
-            self.obd.start_async_reading(update_rate=0.1)
-            self.status.config(fg="#2ecc71")
+    def connection_monitor(self):
+        """Continuously monitor and attempt OBD connection"""
+        while self.running:
+            if not self.connected:
+                self.connection_attempts += 1
+                status_msg = f"Connecting... (attempt {self.connection_attempts})"
+                self.status.config(text=status_msg, fg="#f39c12")
+                
+                try:
+                    # Create new OBD reader
+                    if self.obd is None:
+                        self.obd = OBDReader(
+                            port=self.config.get("obd.port"),
+                            baudrate=self.config.get("obd.baudrate")
+                        )
+                    
+                    # Try to connect
+                    if self.obd.connect(timeout=5):
+                        self.connected = True
+                        self.obd.start_async_reading(update_rate=0.1)
+                        self.status.config(text="Connected ●", fg="#2ecc71")
+                        self.start_btn.config(state=tk.NORMAL)
+                        print(f"OBD connected after {self.connection_attempts} attempts")
+                    else:
+                        # Connection failed, wait before retry
+                        time.sleep(3)
+                except Exception as e:
+                    print(f"Connection error: {e}")
+                    time.sleep(3)
+            else:
+                # Already connected, just check status
+                time.sleep(5)
     
     def start_trip(self):
         if not self.trip_active and self.connected:
@@ -109,34 +139,39 @@ class SimpleGUI:
     def update_display(self):
         if not self.running:
             return
-        if self.connected:
-            self.last_data = self.obd.get_latest_data()
-            spd = self.last_data.get("speed_kph", 0) or 0
-            rpm = self.last_data.get("rpm", 0) or 0
-            thr = self.last_data.get("throttle_pct", 0) or 0
-            
-            self.speed.config(text=f"{spd:.0f}")
-            self.rpm.config(text=f"RPM: {rpm:.0f}")
-            self.throttle.config(text=f"Throttle: {thr:.0f}%")
-            
-            if self.trip_active and self.last_data:
-                score, evt = self.scorer.update(speed_kph=spd, accel=self.last_data.get("accel_calculated", 0))
-                grade = self.scorer.get_grade()
-                self.score_lbl.config(text=f"{score:.0f}")
-                self.grade.config(text=f"Grade: {grade}")
-                self.score_lbl.config(fg="#2ecc71" if grade in ["A","B"] else "#f39c12" if grade=="C" else "#e74c3c")
-                self.events.config(text=f"Events: {self.scorer.harsh_brake_count + self.scorer.aggressive_accel_count}")
-                self.logger.log_data({**self.last_data, "score": score, "event_type": evt or ""})
+        
+        if self.connected and self.obd:
+            try:
+                self.last_data = self.obd.get_latest_data()
+                spd = self.last_data.get("speed_kph", 0) or 0
+                rpm = self.last_data.get("rpm", 0) or 0
+                thr = self.last_data.get("throttle_pct", 0) or 0
+                
+                self.speed.config(text=f"{spd:.0f}")
+                self.rpm.config(text=f"RPM: {rpm:.0f}")
+                self.throttle.config(text=f"Throttle: {thr:.0f}%")
+                
+                if self.trip_active and self.last_data:
+                    score, evt = self.scorer.update(speed_kph=spd, accel=self.last_data.get("accel_calculated", 0))
+                    grade = self.scorer.get_grade()
+                    self.score_lbl.config(text=f"{score:.0f}")
+                    self.grade.config(text=f"Grade: {grade}")
+                    self.score_lbl.config(fg="#2ecc71" if grade in ["A","B"] else "#f39c12" if grade=="C" else "#e74c3c")
+                    self.events.config(text=f"Events: {self.scorer.harsh_brake_count + self.scorer.aggressive_accel_count}")
+                    self.logger.log_data({**self.last_data, "score": score, "event_type": evt or ""})
+            except Exception as e:
+                print(f"Update error: {e}")
+        
         self.root.after(100, self.update_display)
     
     def quit_app(self):
         self.running = False
         if self.trip_active:
             self.stop_trip()
-        if self.connected:
+        if self.connected and self.obd:
             self.obd.disconnect()
         self.root.quit()
 
 root = tk.Tk()
-app = SimpleGUI(root)
+app = AutoConnectGUI(root)
 root.mainloop()
