@@ -1,25 +1,5 @@
 # BMW X5 Driver Behavior Monitor - Phase 1
 
-## Quick Start
-
-**Status:** Code complete ✅ | Testing: Pending (needs car access)
-
-### What Works Now
-
-- ✅ Project structure created
-- ✅ All dependencies installed  
-- ✅ OBD-II reader module
-- ✅ Data logging system
-- ✅ Scoring algorithms
-- ✅ Main monitor application
-
-### Next Steps
-
-When you have car access:
-
-1. **Pair OBD-II Adapter** (see phase1/README.md)
-2. **Test connection:** `python3 scripts/test_obd.py`
-3. **Run monitor:** `python3 phase1/obd_monitor.py`
 
 ### Project Structure
 
