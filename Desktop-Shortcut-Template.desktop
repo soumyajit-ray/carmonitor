@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=BMW X5 Monitor
+Comment=Start the BMW X5 driver behavior monitor
+Icon=preferences-system
+Exec=bash -c 'cd /home/rays/carmonitor && DISPLAY=:0 python3 phase1/obd_monitor_touch.py &'
+Terminal=false
+Categories=Application;
