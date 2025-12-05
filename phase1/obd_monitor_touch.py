@@ -3,12 +3,106 @@ import sys, tkinter as tk
 from datetime import datetime
 import threading
 import time
+import math
 
 sys.path.insert(0, "/home/rays/carmonitor")
 from phase1.obd_reader import OBDReader
 from common.config import Config
 from common.logger import TripLogger
 from common.scoring import DriverScorer
+
+class AccelGauge(tk.Canvas):
+    def __init__(self, parent, width=220, height=130):
+        super().__init__(parent, width=width, height=height, bg="black", highlightthickness=0)
+        self.width = width
+        self.height = height
+        self.center_x = width // 2
+        self.center_y = height - 10
+        self.radius = 100
+        
+        # Thresholds
+        self.harsh_brake = -5.0
+        self.aggressive_accel = 3.0
+        self.min_val = -8.0
+        self.max_val = 6.0
+        
+        self.draw_static()
+        
+    def draw_static(self):
+        """Draw the static parts of the gauge"""
+        # Draw arc background (red zones)
+        self.create_arc(
+            self.center_x - self.radius, self.center_y - self.radius,
+            self.center_x + self.radius, self.center_y + self.radius,
+            start=0, extent=180, fill="#e74c3c", outline=""
+        )
+        
+        # Draw green zone (safe range)
+        start_angle = self.value_to_angle(self.harsh_brake)
+        end_angle = self.value_to_angle(self.aggressive_accel)
+        self.create_arc(
+            self.center_x - self.radius, self.center_y - self.radius,
+            self.center_x + self.radius, self.center_y + self.radius,
+            start=end_angle, extent=start_angle - end_angle, 
+            fill="#2ecc71", outline=""
+        )
+        
+        # Draw threshold markers
+        for val in [self.harsh_brake, 0, self.aggressive_accel]:
+            angle = self.value_to_angle(val)
+            angle_rad = math.radians(angle)
+            x1 = self.center_x + (self.radius - 15) * math.cos(angle_rad)
+            y1 = self.center_y - (self.radius - 15) * math.sin(angle_rad)
+            x2 = self.center_x + self.radius * math.cos(angle_rad)
+            y2 = self.center_y - self.radius * math.sin(angle_rad)
+            self.create_line(x1, y1, x2, y2, fill="white", width=2)
+        
+        # Labels
+        self.create_text(20, self.center_y - 5, text=f"{self.harsh_brake}", 
+                        fill="white", font=("Helvetica", 10))
+        self.create_text(self.center_x, self.center_y - self.radius + 15, text="0", 
+                        fill="white", font=("Helvetica", 10))
+        self.create_text(self.width - 20, self.center_y - 5, text=f"+{self.aggressive_accel}", 
+                        fill="white", font=("Helvetica", 10))
+        
+        self.create_text(self.center_x, 10, text="ACCELERATION (m/s²)", 
+                        fill="gray", font=("Helvetica", 9, "bold"))
+        
+        # Needle (will be updated)
+        self.needle = None
+        self.value_text = self.create_text(self.center_x, self.center_y - 30, 
+                                           text="0.0", fill="white", 
+                                           font=("Helvetica", 16, "bold"))
+    
+    def value_to_angle(self, value):
+        """Convert acceleration value to angle (0-180 degrees)"""
+        normalized = (value - self.min_val) / (self.max_val - self.min_val)
+        return 180 * (1 - normalized)  # Reverse so left is negative
+    
+    def update_needle(self, value):
+        """Update the needle position"""
+        # Clamp value
+        value = max(self.min_val, min(self.max_val, value))
+        
+        # Delete old needle
+        if self.needle:
+            self.delete(self.needle)
+        
+        # Calculate needle position
+        angle = self.value_to_angle(value)
+        angle_rad = math.radians(angle)
+        end_x = self.center_x + (self.radius - 20) * math.cos(angle_rad)
+        end_y = self.center_y - (self.radius - 20) * math.sin(angle_rad)
+        
+        # Draw needle
+        self.needle = self.create_line(
+            self.center_x, self.center_y, end_x, end_y,
+            fill="#f39c12", width=3, arrow=tk.LAST
+        )
+        
+        # Update value text
+        color = "#2ecc71" if self.harsh_brake <= value <= self.aggressive_accel else "#e74c3c"
+        self.itemconfig(self.value_text, text=f"{value:.1f}", fill=color)
 
 class AutoConnectGUI:
     def __init__(self, root):
@@ -35,88 +129,104 @@ class AutoConnectGUI:
         self.update_display()
     
     def create_widgets(self):
-        # BUTTONS AT TOP
-        btns = tk.Frame(self.root, bg="#2c3e50", height=70)
+        # BUTTONS AT TOP - Reduced height to 60px
+        btns = tk.Frame(self.root, bg="#2c3e50", height=60)
         btns.pack(side=tk.TOP, fill=tk.X)
         btns.pack_propagate(False)
         
-        tk.Label(btns, text="BMW X5", font=("Helvetica", 14, "bold"), bg="#2c3e50", fg="white").pack(side=tk.LEFT, padx=10)
+        tk.Label(btns, text="BMW X5", font=("Helvetica", 12, "bold"), 
+                bg="#2c3e50", fg="white").pack(side=tk.LEFT, padx=10)
         
-        self.start_btn = tk.Button(btns, text="START", font=("Helvetica", 18, "bold"), 
-                                   bg="#2ecc71", fg="white", command=self.start_trip, width=8, height=1)
-        self.start_btn.pack(side=tk.LEFT, padx=10, pady=15)
+        self.start_btn = tk.Button(btns, text="START", font=("Helvetica", 16, "bold"), 
+                                   bg="#2ecc71", fg="white", command=self.start_trip, 
+                                   width=7, height=1)
+        self.start_btn.pack(side=tk.LEFT, padx=8, pady=10)
         
-        self.stop_btn = tk.Button(btns, text="STOP", font=("Helvetica", 18, "bold"),
-                                  bg="#e74c3c", fg="white", command=self.stop_trip, width=8, height=1, state=tk.DISABLED)
-        self.stop_btn.pack(side=tk.LEFT, padx=5, pady=15)
+        self.stop_btn = tk.Button(btns, text="STOP", font=("Helvetica", 16, "bold"),
+                                  bg="#e74c3c", fg="white", command=self.stop_trip, 
+                                  width=7, height=1, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, padx=5, pady=10)
         
-        tk.Button(btns, text="QUIT", font=("Helvetica", 18, "bold"),
-                 bg="#95a5a6", fg="white", command=self.quit_app, width=6, height=1).pack(side=tk.RIGHT, padx=10, pady=15)
+        tk.Button(btns, text="QUIT", font=("Helvetica", 16, "bold"),
+                 bg="#95a5a6", fg="white", command=self.quit_app, 
+                 width=5, height=1).pack(side=tk.RIGHT, padx=8, pady=10)
         
-        self.status = tk.Label(btns, text="Connecting...", font=("Helvetica", 12), bg="#2c3e50", fg="#f39c12")
+        self.status = tk.Label(btns, text="Connecting...", font=("Helvetica", 10), 
+                              bg="#2c3e50", fg="#f39c12")
         self.status.pack(side=tk.RIGHT, padx=10)
         
-        # Data display
+        # Main area
         main = tk.Frame(self.root, bg="black")
-        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
+        # Left: Speed + RPM/Throttle
         left = tk.Frame(main, bg="black")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        self.speed = tk.Label(left, text="--", font=("Helvetica", 70, "bold"), bg="black", fg="white")
+        self.speed = tk.Label(left, text="--", font=("Helvetica", 60, "bold"), 
+                             bg="black", fg="white")
         self.speed.pack()
-        tk.Label(left, text="km/h", font=("Helvetica", 16), bg="black", fg="gray").pack()
+        tk.Label(left, text="km/h", font=("Helvetica", 14), 
+                bg="black", fg="gray").pack()
         
-        self.rpm = tk.Label(left, text="RPM: --", font=("Helvetica", 20), bg="black", fg="white")
-        self.rpm.pack(pady=10)
-        self.throttle = tk.Label(left, text="Throttle: --", font=("Helvetica", 20), bg="black", fg="white")
+        self.rpm = tk.Label(left, text="RPM: --", font=("Helvetica", 16), 
+                           bg="black", fg="white")
+        self.rpm.pack(pady=3)
+        self.throttle = tk.Label(left, text="Throttle: --", font=("Helvetica", 16), 
+                                bg="black", fg="white")
         self.throttle.pack()
         
-        right = tk.Frame(main, bg="#34495e", width=250)
-        right.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
+        # Center: Acceleration Gauge
+        center = tk.Frame(main, bg="black")
+        center.pack(side=tk.LEFT, padx=5)
+        
+        self.accel_gauge = AccelGauge(center)
+        self.accel_gauge.pack()
+        
+        # Right: Score panel
+        right = tk.Frame(main, bg="#34495e", width=200)
+        right.pack(side=tk.RIGHT, fill=tk.Y)
         right.pack_propagate(False)
         
-        self.trip_lbl = tk.Label(right, text="READY", font=("Helvetica", 14, "bold"), bg="#34495e", fg="#f39c12")
-        self.trip_lbl.pack(pady=10)
+        self.trip_lbl = tk.Label(right, text="READY", font=("Helvetica", 12, "bold"), 
+                                bg="#34495e", fg="#f39c12")
+        self.trip_lbl.pack(pady=8)
         
-        self.score_lbl = tk.Label(right, text="--", font=("Helvetica", 60, "bold"), bg="#34495e", fg="#2ecc71")
-        self.score_lbl.pack(pady=10)
-        self.grade = tk.Label(right, text="Grade: --", font=("Helvetica", 16), bg="#34495e", fg="white")
+        self.score_lbl = tk.Label(right, text="--", font=("Helvetica", 50, "bold"), 
+                                 bg="#34495e", fg="#2ecc71")
+        self.score_lbl.pack(pady=5)
+        self.grade = tk.Label(right, text="Grade: --", font=("Helvetica", 14), 
+                             bg="#34495e", fg="white")
         self.grade.pack()
-        self.events = tk.Label(right, text="Events: 0", font=("Helvetica", 13), bg="#34495e", fg="gray")
-        self.events.pack(pady=10)
+        self.events = tk.Label(right, text="Events: 0", font=("Helvetica", 11), 
+                              bg="#34495e", fg="gray")
+        self.events.pack(pady=8)
     
     def connection_monitor(self):
         """Continuously monitor and attempt OBD connection"""
         while self.running:
             if not self.connected:
                 self.connection_attempts += 1
-                status_msg = f"Connecting... (attempt {self.connection_attempts})"
+                status_msg = f"Connecting... ({self.connection_attempts})"
                 self.status.config(text=status_msg, fg="#f39c12")
                 
                 try:
-                    # Create new OBD reader
                     if self.obd is None:
                         self.obd = OBDReader(
                             port=self.config.get("obd.port"),
                             baudrate=self.config.get("obd.baudrate")
                         )
                     
-                    # Try to connect
                     if self.obd.connect(timeout=5):
                         self.connected = True
                         self.obd.start_async_reading(update_rate=0.1)
                         self.status.config(text="Connected ●", fg="#2ecc71")
                         self.start_btn.config(state=tk.NORMAL)
-                        print(f"OBD connected after {self.connection_attempts} attempts")
                     else:
-                        # Connection failed, wait before retry
                         time.sleep(3)
                 except Exception as e:
-                    print(f"Connection error: {e}")
                     time.sleep(3)
             else:
-                # Already connected, just check status
                 time.sleep(5)
     
     def start_trip(self):
@@ -146,21 +256,30 @@ class AutoConnectGUI:
                 spd = self.last_data.get("speed_kph", 0) or 0
                 rpm = self.last_data.get("rpm", 0) or 0
                 thr = self.last_data.get("throttle_pct", 0) or 0
+                accel = self.last_data.get("accel_calculated", 0) or 0
                 
                 self.speed.config(text=f"{spd:.0f}")
                 self.rpm.config(text=f"RPM: {rpm:.0f}")
                 self.throttle.config(text=f"Throttle: {thr:.0f}%")
                 
+                # Update acceleration gauge
+                self.accel_gauge.update_needle(accel)
+                
                 if self.trip_active and self.last_data:
-                    score, evt = self.scorer.update(speed_kph=spd, accel=self.last_data.get("accel_calculated", 0))
+                    score, evt = self.scorer.update(speed_kph=spd, accel=accel)
                     grade = self.scorer.get_grade()
                     self.score_lbl.config(text=f"{score:.0f}")
                     self.grade.config(text=f"Grade: {grade}")
-                    self.score_lbl.config(fg="#2ecc71" if grade in ["A","B"] else "#f39c12" if grade=="C" else "#e74c3c")
-                    self.events.config(text=f"Events: {self.scorer.harsh_brake_count + self.scorer.aggressive_accel_count}")
+                    color = "#2ecc71" if grade in ["A","B"] else "#f39c12" if grade=="C" else "#e74c3c"
+                    self.score_lbl.config(fg=color)
+                    events_total = self.scorer.harsh_brake_count + self.scorer.aggressive_accel_count
+                    self.events.config(text=f"Events: {events_total}")
                     self.logger.log_data({**self.last_data, "score": score, "event_type": evt or ""})
             except Exception as e:
-                print(f"Update error: {e}")
+                pass
+        else:
+            # Not connected - show 0 on gauge
+            self.accel_gauge.update_needle(0)
         
         self.root.after(100, self.update_display)
     
