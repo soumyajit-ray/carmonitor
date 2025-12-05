@@ -12,13 +12,13 @@ from common.logger import TripLogger
 from common.scoring import DriverScorer
 
 class AccelGauge(tk.Canvas):
-    def __init__(self, parent, width=220, height=130):
+    def __init__(self, parent, width=220, height=160):
         super().__init__(parent, width=width, height=height, bg="black", highlightthickness=0)
         self.width = width
         self.height = height
         self.center_x = width // 2
-        self.center_y = height - 10
-        self.radius = 100
+        self.center_y = height // 2 + 10
+        self.radius = 70
         
         # Thresholds
         self.harsh_brake = -5.0
@@ -30,54 +30,85 @@ class AccelGauge(tk.Canvas):
         
     def draw_static(self):
         """Draw the static parts of the gauge"""
-        # Draw arc background (red zones)
+        # Draw red background arc (full range)
         self.create_arc(
             self.center_x - self.radius, self.center_y - self.radius,
             self.center_x + self.radius, self.center_y + self.radius,
-            start=0, extent=180, fill="#e74c3c", outline=""
+            start=225, extent=90, fill="#e74c3c", outline="", style=tk.PIESLICE
         )
         
-        # Draw green zone (safe range)
-        start_angle = self.value_to_angle(self.harsh_brake)
-        end_angle = self.value_to_angle(self.aggressive_accel)
+        # Draw green zone (safe range) - from harsh_brake to aggressive_accel
+        # Calculate angles for green zone
+        harsh_angle = self.value_to_angle(self.harsh_brake)
+        accel_angle = self.value_to_angle(self.aggressive_accel)
+        extent = accel_angle - harsh_angle
+        
         self.create_arc(
             self.center_x - self.radius, self.center_y - self.radius,
             self.center_x + self.radius, self.center_y + self.radius,
-            start=end_angle, extent=start_angle - end_angle, 
-            fill="#2ecc71", outline=""
+            start=harsh_angle, extent=extent, fill="#2ecc71", outline="", style=tk.PIESLICE
+        )
+        
+        # Draw red zone on right (aggressive acceleration)
+        self.create_arc(
+            self.center_x - self.radius, self.center_y - self.radius,
+            self.center_x + self.radius, self.center_y + self.radius,
+            start=accel_angle, extent=315 - accel_angle, fill="#e74c3c", outline="", style=tk.PIESLICE
+        )
+        
+        # Draw center circle
+        center_r = 10
+        self.create_oval(
+            self.center_x - center_r, self.center_y - center_r,
+            self.center_x + center_r, self.center_y + center_r,
+            fill="#2c3e50", outline="white", width=2
         )
         
         # Draw threshold markers
         for val in [self.harsh_brake, 0, self.aggressive_accel]:
             angle = self.value_to_angle(val)
             angle_rad = math.radians(angle)
-            x1 = self.center_x + (self.radius - 15) * math.cos(angle_rad)
-            y1 = self.center_y - (self.radius - 15) * math.sin(angle_rad)
-            x2 = self.center_x + self.radius * math.cos(angle_rad)
-            y2 = self.center_y - self.radius * math.sin(angle_rad)
+            x1 = self.center_x + (self.radius - 12) * math.cos(angle_rad)
+            y1 = self.center_y - (self.radius - 12) * math.sin(angle_rad)
+            x2 = self.center_x + (self.radius + 5) * math.cos(angle_rad)
+            y2 = self.center_y - (self.radius + 5) * math.sin(angle_rad)
             self.create_line(x1, y1, x2, y2, fill="white", width=2)
         
         # Labels
-        self.create_text(20, self.center_y - 5, text=f"{self.harsh_brake}", 
-                        fill="white", font=("Helvetica", 10))
-        self.create_text(self.center_x, self.center_y - self.radius + 15, text="0", 
-                        fill="white", font=("Helvetica", 10))
-        self.create_text(self.width - 20, self.center_y - 5, text=f"+{self.aggressive_accel}", 
-                        fill="white", font=("Helvetica", 10))
+        # Left label (harsh brake)
+        angle_rad = math.radians(self.value_to_angle(self.harsh_brake))
+        x = self.center_x + (self.radius + 20) * math.cos(angle_rad)
+        y = self.center_y - (self.radius + 20) * math.sin(angle_rad)
+        self.create_text(x, y, text=str(int(self.harsh_brake)), 
+                        fill="white", font=("Helvetica", 9, "bold"))
         
-        self.create_text(self.center_x, 10, text="ACCELERATION (m/s²)", 
+        # Top label (0)
+        self.create_text(self.center_x, self.center_y - self.radius - 18, text="0", 
+                        fill="white", font=("Helvetica", 10, "bold"))
+        
+        # Right label (aggressive accel)
+        angle_rad = math.radians(self.value_to_angle(self.aggressive_accel))
+        x = self.center_x + (self.radius + 20) * math.cos(angle_rad)
+        y = self.center_y - (self.radius + 20) * math.sin(angle_rad)
+        self.create_text(x, y, text=f"+{int(self.aggressive_accel)}", 
+                        fill="white", font=("Helvetica", 9, "bold"))
+        
+        self.create_text(self.center_x, 8, text="ACCEL (m/s²)", 
                         fill="gray", font=("Helvetica", 9, "bold"))
         
         # Needle (will be updated)
         self.needle = None
-        self.value_text = self.create_text(self.center_x, self.center_y - 30, 
+        self.value_text = self.create_text(self.center_x, self.height - 15, 
                                            text="0.0", fill="white", 
-                                           font=("Helvetica", 16, "bold"))
+                                           font=("Helvetica", 14, "bold"))
     
     def value_to_angle(self, value):
-        """Convert acceleration value to angle (0-180 degrees)"""
+        """Convert acceleration value to angle (225 to 315 degrees, 0 at top)"""
+        # Normalize value to 0-1 range
         normalized = (value - self.min_val) / (self.max_val - self.min_val)
-        return 180 * (1 - normalized)  # Reverse so left is negative
+        # Map to angle: 225 (left/brake) to 315 (right/accel), with 270 at center (0)
+        angle = 225 + (normalized * 90)
+        return angle
     
     def update_needle(self, value):
         """Update the needle position"""
@@ -91,18 +122,19 @@ class AccelGauge(tk.Canvas):
         # Calculate needle position
         angle = self.value_to_angle(value)
         angle_rad = math.radians(angle)
-        end_x = self.center_x + (self.radius - 20) * math.cos(angle_rad)
-        end_y = self.center_y - (self.radius - 20) * math.sin(angle_rad)
+        end_x = self.center_x + (self.radius - 15) * math.cos(angle_rad)
+        end_y = self.center_y - (self.radius - 15) * math.sin(angle_rad)
         
         # Draw needle
         self.needle = self.create_line(
             self.center_x, self.center_y, end_x, end_y,
-            fill="#f39c12", width=3, arrow=tk.LAST
+            fill="#f39c12", width=4, arrow=tk.LAST, arrowshape=(10, 12, 4)
         )
         
         # Update value text
         color = "#2ecc71" if self.harsh_brake <= value <= self.aggressive_accel else "#e74c3c"
         self.itemconfig(self.value_text, text=f"{value:.1f}", fill=color)
+
 
 class AutoConnectGUI:
     def __init__(self, root):
